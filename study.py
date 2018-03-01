@@ -17,7 +17,7 @@ class StudyBuddy(object):
         self._write_file_with_ids()
         self._set_points()
         self._read_metadata()
-        self._filter_points_under_threshold()
+        self._filter_points_to_study()
 
 
     def _get_point_id(self, line):
@@ -87,10 +87,7 @@ class StudyBuddy(object):
     def _set_points(self):
         with open(self.file_path, 'r') as f:
             all_lines = f.read().splitlines()
-        point_lines = []
-        for line in all_lines:
-            if self._is_point_line(line):
-                point_lines.append(line)
+        point_lines = [ line for line in all_lines if self._is_point_line(line) ]
         self.points = []
         new_point = {}
         for line in point_lines:
@@ -104,18 +101,23 @@ class StudyBuddy(object):
                 new_point = {}
 
 
-    def _filter_points_under_threshold(self):
-        points_under_threshold = []
-        for point in self.points:
-            point_metadata = self._get_point_metadata(point['point_id'])
-            try:
-                point_success_rate = point_metadata['successful_guess_count'] / point_metadata['total_guess_count']
-            except ZeroDivisionError:
-                point_success_rate = 0
-            if point_success_rate < self.success_rate_threshold\
-                    and (not point_metadata['is_hidden'] or self.show_all):
-                points_under_threshold.append(point)
-        self.points = points_under_threshold
+    def _filter_points_to_study(self):
+        self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
+
+
+    def _should_study_point(self, point):
+        point_metadata = self._get_point_metadata(point['point_id'])
+        try:
+            point_success_rate = point_metadata['successful_guess_count'] / point_metadata['total_guess_count']
+        except ZeroDivisionError:
+            point_success_rate = 0.00
+        if point_success_rate >= self.success_rate_threshold:
+            return False
+        if point_metadata['is_hidden'] and not self.show_all:
+            return False
+        if point_metadata['total_guess_count'] < 3:
+            return True
+        return True
 
 
     def _handle_response(self, point):
@@ -123,13 +125,13 @@ class StudyBuddy(object):
         point_metadata = self._get_point_metadata(point['point_id'])
         if response == 'h':
             point_metadata['is_hidden'] = True
-        elif response == 'y':
+        elif response == 'y' or response == 'c':
             point_metadata['successful_guess_count'] += 1
             point_metadata['total_guess_count'] += 1
-        elif response == 'n':
+        elif response == 'n' or response == 'i':
             point_metadata['total_guess_count'] += 1
-        elif response == 'i':
-            print 'Ignoring...'
+        elif response == 'p':
+            print 'Passing...'
         else:
             print 'Mark correct or not'
             return self._handle_response(point)
@@ -147,7 +149,7 @@ class StudyBuddy(object):
 
     def study(self):
         random.shuffle(self.points)
-        for point in self.points:
+        for point in self.points_to_study:
             print '\n'
             print point['question']
             raw_input()
