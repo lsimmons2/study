@@ -10,10 +10,11 @@ import json
 class StudyBuddy(object):
 
 
-    def __init__(self, file_path=None, show_all=False, success_rate_threshold=1.00):
+    def __init__(self, file_path=None, show_all=False, success_rate_threshold=1.00, just_show_statistics=False):
         self.file_path = file_path
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
+        self.just_show_statistics = just_show_statistics
         self._write_file_with_ids()
         self._set_points()
         self._read_metadata()
@@ -107,17 +108,22 @@ class StudyBuddy(object):
 
     def _should_study_point(self, point):
         point_metadata = self._get_point_metadata(point['point_id'])
-        try:
-            point_success_rate = point_metadata['successful_guess_count'] / point_metadata['total_guess_count']
-        except ZeroDivisionError:
-            point_success_rate = 0.00
+        point_success_rate = self._get_point_success_rate(point)
+        if point_metadata['total_guess_count'] < 3:
+            return True
         if point_success_rate >= self.success_rate_threshold:
             return False
         if point_metadata['is_hidden'] and not self.show_all:
             return False
-        if point_metadata['total_guess_count'] < 3:
-            return True
         return True
+
+
+    def _get_point_success_rate(self, point):
+        point_metadata = self._get_point_metadata(point['point_id'])
+        try:
+            return float(point_metadata['successful_guess_count']) / point_metadata['total_guess_count']
+        except ZeroDivisionError:
+            return 0.00
 
 
     def _handle_response(self, point):
@@ -147,7 +153,20 @@ class StudyBuddy(object):
             json.dump(self.metadata, f, indent=2)
 
 
+    def _show_statistics(self):
+        for point in self.points:
+            print
+            print point['question']
+            point_metadata = self._get_point_metadata(point['point_id'])
+            success_rate = self._get_point_success_rate(point)
+            print '%d / %d = %.2f' % (point_metadata['successful_guess_count'],
+                                      point_metadata['total_guess_count'],
+                                      success_rate)
+
+
     def study(self):
+        if self.just_show_statistics:
+            return self._show_statistics()
         random.shuffle(self.points)
         for point in self.points_to_study:
             print '\n'
@@ -161,12 +180,14 @@ class StudyBuddy(object):
 
 def get_options():
     args = sys.argv[1:]
-    file_path = args[0]
+    file_path = args[-1]
     options = {'file_path': file_path}
     if '-a' in args:
         options['show_all'] = True
+    if '-t' in args:
+        options['success_rate_threshold'] = float(args[args.index('-t') + 1])
     if '-s' in args:
-        options['success_rate_threshold'] = float(args[args.index('-s') + 1])
+        options['just_show_statistics'] = True
     return options
 
 
