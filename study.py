@@ -17,6 +17,7 @@ class StudyBuddy(object):
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
+        self.images = []
         self._write_file_with_ids()
         self._set_points()
         self._read_metadata()
@@ -206,27 +207,35 @@ class StudyBuddy(object):
         print '\n'
         if point['question_is_image']:
             question_image = PointImage(point['question'])
-            answer_image = PointImage(point['answer'])
             question_image.open()
-            raw_input()
-            answer_image.open()
-            self._handle_response(point)
-            question_image.close()
-            answer_image.close()
+            self.images.append(question_image)
         else:
             print point['question']
-            raw_input()
+        raw_input()
+        if point['answer_is_image']:
+            answer_image = PointImage(point['answer'])
+            answer_image.open()
+            self.images.append(answer_image)
+        else:
             print point['answer']
-            self._handle_response(point)
+        self._handle_response(point)
+        self._close_images()
+
+
+    def _close_images(self):
+        for image in self.images:
+            image.close()
 
 
     def study(self):
         if self.just_show_statistics:
             return self._show_statistics()
-        for point in self.points_to_study:
-            self._study_point(point)
-        self._save_metadata()
-
+        try:
+            for point in self.points_to_study:
+                self._study_point(point)
+            self._save_metadata()
+        except KeyboardInterrupt:
+            self._close_images()
 
 
 
