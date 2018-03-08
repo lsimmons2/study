@@ -1,9 +1,11 @@
 
-
 import random
 import sys
 import re
 import json
+import subprocess
+import os
+import signal
 
 
 
@@ -28,33 +30,42 @@ class StudyBuddy(object):
             return None
 
 
+    def _get_file_lines(self):
+        with open(self.file_path, 'r') as f:
+            all_lines = f.read().splitlines()
+        real_lines = [ line for line in all_lines if line ] # remove empty lines
+        return real_lines
+
+
+
     def _write_file_with_ids(self):
+        # will collect these for use in self._read_metadata()
+        self.file_point_ids = []
         new_file_str = ''
         last_id = 0
-        with open(self.file_path, 'r') as f:
-            for line in f.read().splitlines():
-                if self._is_point_line(line):
-                    line_id = self._get_point_id(line)
-                    if line_id:
-                        last_id = line_id
-                    # if ends with ? then doesn't end with id, and needs to
-                    if line.strip().endswith('?'):
-                        new_id = last_id + 1
-                        line = line + ' ' + str(new_id)
-                        last_id = new_id
-                new_file_str += line + '\n'
+        file_lines = self._get_file_lines()
+        for line in file_lines:
+            if not self._is_comment(line):
+                line_id = self._get_point_id(line)
+                if line_id:
+                    last_id = line_id
+                # if ends with ? then doesn't end with id, and needs to
+                if line.strip().endswith('?'):
+                    new_id = last_id + 1
+                    line = line + ' ' + str(new_id)
+                    last_id = new_id
+            new_file_str += line + '\n'
+            self.file_point_ids.append(last_id)
         with open(self.file_path, 'w') as f:
             f.write(new_file_str)
     
 
-    def _is_point_line(self, line):
+    def _is_comment(self, line):
         if line.startswith('-'):
-            return False
+            return True
         if line.startswith('*'):
-            return False
-        if not len(line):
-            return False
-        return True
+            return True
+        return False
 
 
     def _read_metadata(self):
@@ -62,16 +73,24 @@ class StudyBuddy(object):
         try:
             with open(metadata_file_path, 'r') as f:
                 self.metadata = json.load(f)
+            metadata_point_ids = self.metadata.keys()
+            for point_id in self.file_point_ids:
+                if point_id not in metadata_point_ids:
+                    self.metadata[point_id] = self._get_default_metadata()
         except (IOError, ValueError):
             # metadata file hasn't been created or isn't json
             self.metadata = {}
             for point in self.points:
                 point_id = str(point['point_id'])
-                self.metadata[point_id] = {
-                    'successful_guess_count': 0,
-                    'total_guess_count': 0,
-                    'is_hidden': False
-                }
+                self.metadata[point_id] = self._get_default_metadata()
+
+
+    def _get_default_metadata(self):
+        return {
+            'successful_guess_count': 0,
+            'total_guess_count': 0,
+            'is_hidden': False
+        }
 
 
     def _get_metadata_file_path(self):
@@ -85,21 +104,40 @@ class StudyBuddy(object):
         return metadata_file_path
 
 
+    def _is_question_line(self, line):
+        if self._is_comment(line):
+            return False
+        line_point_id = self._get_point_id(line)
+        # question lines will have a point_id after self._write_file_with_ids()
+        return bool(line_point_id)
+
+
+    def _is_image_path(self, string):
+        # will do more sophisticated logic if needed
+        return '.png' in string
+
+
     def _set_points(self):
-        with open(self.file_path, 'r') as f:
-            all_lines = f.read().splitlines()
-        point_lines = [ line for line in all_lines if self._is_point_line(line) ]
+        all_lines = self._get_file_lines()
         self.points = []
-        new_point = {}
-        for line in point_lines:
-            if 'question' not in new_point:
-                question = line[:-2] # remove id from question line
+        for index, line in enumerate(all_lines):
+            if self._is_question_line(line):
                 point_id = self._get_point_id(line)
-                new_point = {'question': question, 'point_id': point_id}
-            else:
-                new_point['answer'] = line
+                question_is_image = self._is_image_path(line)
+                if question_is_image:
+                    question = line[:-3] # remove id and question mark from question line
+                else:
+                    question = line[:-2] # just remove id
+                answer = all_lines[index+1] # answer should be line after question line
+                answer_is_image = self._is_image_path(answer)
+                new_point = {
+                    'point_id': point_id,
+                    'question': question,
+                    'question_is_image': question_is_image,
+                    'answer_is_image': answer_is_image,
+                    'answer': answer
+                }
                 self.points.append(new_point)
-                new_point = {}
 
 
     def _filter_points_to_study(self):
@@ -164,17 +202,51 @@ class StudyBuddy(object):
                                       success_rate)
 
 
-    def study(self):
-        if self.just_show_statistics:
-            return self._show_statistics()
-        random.shuffle(self.points)
-        for point in self.points_to_study:
-            print '\n'
+    def _study_point(self, point):
+        print '\n'
+        if point['question_is_image']:
+            question_image = PointImage(point['question'])
+            answer_image = PointImage(point['answer'])
+            question_image.open()
+            raw_input()
+            answer_image.open()
+            self._handle_response(point)
+            question_image.close()
+            answer_image.close()
+        else:
             print point['question']
             raw_input()
             print point['answer']
             self._handle_response(point)
+
+
+    def study(self):
+        if self.just_show_statistics:
+            return self._show_statistics()
+        for point in self.points_to_study:
+            self._study_point(point)
         self._save_metadata()
+
+
+
+
+class PointImage(object):
+
+    '''passed a file path of an image at start up closes and opens said image'''
+
+    def __init__(self, image_path):
+        self.image_path = image_path
+
+    def open(self):
+        open_image_cmd = 'gnome-open %s' % self.image_path
+        self.process = subprocess.Popen(open_image_cmd,
+                                        shell=True,
+                                        stdout=subprocess.PIPE,
+                                        preexec_fn=os.setsid)
+
+    def close(self):
+        pid = os.getpgid(self.process.pid)
+        os.killpg(pid, signal.SIGTERM)
 
 
 
