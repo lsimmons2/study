@@ -1,5 +1,4 @@
 
-import random
 import sys
 import re
 import json
@@ -12,16 +11,45 @@ import signal
 class StudyBuddy(object):
 
 
-    def __init__(self, file_path=None, show_all=False, success_rate_threshold=1.00, just_show_statistics=False):
-        self.file_path = file_path
+    def __init__(self, study_file_path=None, show_all=False, success_rate_threshold=1.00, just_show_statistics=False):
+        self.study_file_path = study_file_path
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
-        self.images = []
+
+        self.metadata_file_path = self._get_metadata_file_path()
+        self._check_metadata_file()
+        self.highest_point_id = self._get_highest_point_id()
         self._write_file_with_ids()
+
         self._set_points()
-        self._read_metadata()
         self._filter_points_to_study()
+
+
+    def _get_highest_point_id(self):
+        with open(self.metadata_file_path, 'r') as f:
+            all_points_metadata = json.load(f)
+        point_ids = [ int(point_id) for point_id in all_points_metadata.keys() ]
+        try:
+            return sorted([])[-1]
+        except IndexError:
+            return 0
+
+
+    def _get_metadata_file_path(self):
+        return os.path.expanduser('~') + '/.study_metadata.json'
+
+
+    def _check_metadata_file(self):
+        try:
+            with open(self.metadata_file_path, 'r') as f:
+                json.load(f)
+        except IOError:
+            with open(self.metadata_file_path, 'w') as f:
+                print 'Creating empty metadata file %s.' % self.metadata_file_path
+                json.dump({}, f)
+        except ValueError:
+            raise Exception('Metadata file %s is messed up and isn\'t proper JSON.' % self.metadata_file_path)
 
 
     def _get_point_id(self, line):
@@ -32,15 +60,13 @@ class StudyBuddy(object):
 
 
     def _get_file_lines(self):
-        with open(self.file_path, 'r') as f:
+        with open(self.study_file_path, 'r') as f:
             return f.read().splitlines()
 
 
     def _write_file_with_ids(self):
-        # will collect these for use in self._read_metadata()
-        self.file_point_ids = []
         new_file_str = ''
-        last_id = 0
+        last_id = self.highest_point_id
         file_lines = self._get_file_lines()
         comment_lines = []
         for line in file_lines:
@@ -54,14 +80,12 @@ class StudyBuddy(object):
                     line = line + ' ' + str(new_id)
                     last_id = new_id
                 new_file_str += line + '\n'
-                self.file_point_ids.append(last_id)
             else:
                 comment_lines.append(line)
-        if len(comment_lines):
-            new_file_str += '\n\n'
+        # comment_lines are pushed to bottom of file
         for comment_line in comment_lines:
             new_file_str += comment_line + '\n'
-        with open(self.file_path, 'w') as f:
+        with open(self.study_file_path, 'w') as f:
             f.write(new_file_str)
     
 
@@ -73,42 +97,6 @@ class StudyBuddy(object):
         return False
 
 
-    def _read_metadata(self):
-        metadata_file_path = self._get_metadata_file_path()
-        try:
-            with open(metadata_file_path, 'r') as f:
-                self.metadata = json.load(f)
-            metadata_point_ids = self.metadata.keys()
-            for point_id in self.file_point_ids:
-                if point_id not in metadata_point_ids:
-                    self.metadata[point_id] = self._get_default_metadata()
-        except (IOError, ValueError):
-            # metadata file hasn't been created or isn't json
-            self.metadata = {}
-            for point in self.points:
-                point_id = str(point['point_id'])
-                self.metadata[point_id] = self._get_default_metadata()
-
-
-    def _get_default_metadata(self):
-        return {
-            'successful_guess_count': 0,
-            'total_guess_count': 0,
-            'is_hidden': False
-        }
-
-
-    def _get_metadata_file_path(self):
-        file_path_parts = self.file_path.split('/')
-        metadata_file_name = '.' + file_path_parts[-1].split('.')[0] + '.json'
-        if len(file_path_parts) < 2:
-            # file is in cwd
-            metadata_file_path = metadata_file_name
-        else:
-            metadata_file_path = '/'.join(file_path_parts[:-1]) + '/' + metadata_file_name
-        return metadata_file_path
-
-
     def _is_question_line(self, line):
         if self._is_comment(line):
             return False
@@ -117,82 +105,30 @@ class StudyBuddy(object):
         return bool(line_point_id)
 
 
-    def _is_image_path(self, string):
-        return '.png' in string
-
-
     def _set_points(self):
         all_lines = self._get_file_lines()
         self.points = []
         for index, line in enumerate(all_lines):
             if self._is_question_line(line):
+                question_line = line
+                answer_line = all_lines[index+1] # answer should be line after question line
                 point_id = self._get_point_id(line)
-                question_is_image = self._is_image_path(line)
-                if question_is_image:
-                    question = line[:-3] # remove id and question mark from question line
-                else:
-                    question = line[:-2] # just remove id
-                answer = all_lines[index+1] # answer should be line after question line
-                answer_is_image = self._is_image_path(answer)
-                new_point = {
-                    'point_id': point_id,
-                    'question': question,
-                    'question_is_image': question_is_image,
-                    'answer_is_image': answer_is_image,
-                    'answer': answer
-                }
+                new_point = Point(question_line, answer_line, point_id, self.metadata_file_path)
                 self.points.append(new_point)
 
 
     def _filter_points_to_study(self):
         self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
 
-
+            
     def _should_study_point(self, point):
-        point_metadata = self._get_point_metadata(point['point_id'])
-        point_success_rate = self._get_point_success_rate(point)
-        if point_metadata['total_guess_count'] < 3:
+        if point.total_guess_count < 3:
             return True
-        if point_success_rate >= self.success_rate_threshold:
+        if point.get_success_rate() >= self.success_rate_threshold:
             return False
-        if point_metadata['is_hidden'] and not self.show_all:
+        if point.is_hidden and not self.show_all:
             return False
         return True
-
-
-    def _get_point_success_rate(self, point):
-        point_metadata = self._get_point_metadata(point['point_id'])
-        try:
-            return float(point_metadata['successful_guess_count']) / point_metadata['total_guess_count']
-        except ZeroDivisionError:
-            return 0.00
-
-
-    def _handle_response(self, point):
-        response = raw_input()
-        point_metadata = self._get_point_metadata(point['point_id'])
-        if response == 'h':
-            point_metadata['is_hidden'] = True
-        elif response == 'y' or response == 'c':
-            point_metadata['successful_guess_count'] += 1
-            point_metadata['total_guess_count'] += 1
-        elif response == 'n' or response == 'i':
-            point_metadata['total_guess_count'] += 1
-        elif response == 'p':
-            print 'Passing...'
-        else:
-            print 'Mark correct or not'
-            return self._handle_response(point)
-
-
-    def _get_point_metadata(self, point_id):
-        return self.metadata[str(point_id)]
-
-
-    def _save_metadata(self):
-        metadata_file_path = self._get_metadata_file_path()
-        with open(metadata_file_path, 'w') as f:
-            json.dump(self.metadata, f, indent=2)
 
 
     def _show_statistics(self):
@@ -206,22 +142,65 @@ class StudyBuddy(object):
                                       success_rate)
 
 
-    def _study_point(self, point):
+    def study(self):
+        if self.just_show_statistics:
+            return self._show_statistics()
+        try:
+            for point in self.points_to_study:
+                point.study()
+        except KeyboardInterrupt:
+            print '\nExiting early'
+        for point in self.points:
+            point.tear_down()
+
+
+
+class Point(object):
+
+
+    def __init__(self, question_line, answer_line, point_id, metadata_file_path):
+        self.question_line = question_line
+        self.answer = answer_line
+        self.id = point_id
+        self.question_is_image = self._is_image_path(question_line)
+        self.answer_is_image = self._is_image_path(answer_line)
+        self._trim_question_line()
+        self.metadata_file_path = metadata_file_path
+        self._read_metadata()
+        self.images = []
+
+
+    def study(self):
         print '\n'
-        if point['question_is_image']:
-            question_image = PointImage(point['question'])
+        if self.question_is_image:
+            question_image = PointImage(self.question)
             question_image.open()
             self.images.append(question_image)
         else:
-            print point['question']
+            print self.question
         raw_input()
-        if point['answer_is_image']:
-            answer_image = PointImage(point['answer'])
+        if self.answer_is_image:
+            answer_image = PointImage(self.answer)
             answer_image.open()
             self.images.append(answer_image)
         else:
-            print point['answer']
-        self._handle_response(point)
+            print self.answer
+        self._handle_response()
+        self._close_images()
+
+
+    def _trim_question_line(self):
+        question_end_index = self.question_line.rfind('?')
+        if self.question_is_image:
+            # can't have point id or ? in an image path
+            self.question = self.question_line[:question_end_index:]
+        else:
+            # don't want the point id displayed when asking question
+            self.question = self.question_line[:question_end_index]
+
+
+    def tear_down(self):
+        self._save_metadata()
         self._close_images()
 
 
@@ -230,15 +209,68 @@ class StudyBuddy(object):
             image.close()
 
 
-    def study(self):
-        if self.just_show_statistics:
-            return self._show_statistics()
+    def _save_metadata(self):
+        updated_metadata = {}
+        for attr in self._get_default_metadata().keys():
+            updated_metadata[attr] = getattr(self, attr)
+        with open(self.metadata_file_path, 'r') as f:
+            all_points_metadata = json.load(f)
+        all_points_metadata[str(self.id)] = updated_metadata
+        with open(self.metadata_file_path, 'w') as f:
+            json.dump(all_points_metadata, f, indent=2)
+
+
+    def _handle_response(self):
+        response = raw_input()
+        if response == 'h':
+            self.is_hidden = True
+        elif response == 'y' or response == 'c':
+            self.successful_guess_count += 1
+            self.total_guess_count += 1
+        elif response == 'n' or response == 'i':
+            self.total_guess_count += 1
+        elif response == 'p':
+            print 'Passing...'
+        else:
+            print 'Mark correct or not'
+            return self._handle_response()
+
+
+    def _read_metadata(self):
+        with open(self.metadata_file_path, 'r') as f:
+            all_points_metadata = json.load(f)
         try:
-            for point in self.points_to_study:
-                self._study_point(point)
-            self._save_metadata()
-        except KeyboardInterrupt:
-            self._close_images()
+            point_metadata = all_points_metadata[str(self.id)]
+        except KeyError:
+            point_metadata = self._get_default_metadata()
+        # get attrs from default dict in case more fields are added
+        default_metadata = self._get_default_metadata()
+        for attr in default_metadata.keys():
+            try:
+                setattr(self, attr, point_metadata[attr])
+            except KeyError:
+                # if field has been added to default metadata since point has
+                # been saved - give point default value of new field
+                setattr(self, attr, default_metadata[attr])
+
+
+    def _get_default_metadata(self):
+        return {
+            'total_guess_count': 0,
+            'successful_guess_count': 0,
+            'is_hidden': False
+        }
+
+
+    def _is_image_path(self, string):
+        return '.png' in string
+
+
+    def get_success_rate(self):
+        try:
+            return float(self.successful_guess_count) / self.total_guess_count
+        except ZeroDivisionError:
+            return 0.00
 
 
 
@@ -264,8 +296,8 @@ class PointImage(object):
 
 def get_options():
     args = sys.argv[1:]
-    file_path = args[-1]
-    options = {'file_path': file_path}
+    study_file_path = args[-1]
+    options = {'study_file_path': study_file_path}
     if '-a' in args:
         options['show_all'] = True
     if '-t' in args:
