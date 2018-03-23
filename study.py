@@ -33,10 +33,7 @@ class StudyBuddy(object):
 
     def _get_file_lines(self):
         with open(self.file_path, 'r') as f:
-            all_lines = f.read().splitlines()
-        real_lines = [ line for line in all_lines if line ] # remove empty lines
-        return real_lines
-
+            return f.read().splitlines()
 
 
     def _write_file_with_ids(self):
@@ -45,6 +42,7 @@ class StudyBuddy(object):
         new_file_str = ''
         last_id = 0
         file_lines = self._get_file_lines()
+        comment_lines = []
         for line in file_lines:
             if not self._is_comment(line):
                 line_id = self._get_point_id(line)
@@ -55,8 +53,14 @@ class StudyBuddy(object):
                     new_id = last_id + 1
                     line = line + ' ' + str(new_id)
                     last_id = new_id
-            new_file_str += line + '\n'
-            self.file_point_ids.append(last_id)
+                new_file_str += line + '\n'
+                self.file_point_ids.append(last_id)
+            else:
+                comment_lines.append(line)
+        if len(comment_lines):
+            new_file_str += '\n\n'
+        for comment_line in comment_lines:
+            new_file_str += comment_line + '\n'
         with open(self.file_path, 'w') as f:
             f.write(new_file_str)
     
@@ -114,7 +118,6 @@ class StudyBuddy(object):
 
 
     def _is_image_path(self, string):
-        # will do more sophisticated logic if needed
         return '.png' in string
 
 
