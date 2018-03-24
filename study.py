@@ -134,12 +134,10 @@ class StudyBuddy(object):
     def _show_statistics(self):
         for point in self.points:
             print
-            print point['question']
-            point_metadata = self._get_point_metadata(point['point_id'])
-            success_rate = self._get_point_success_rate(point)
-            print '%d / %d = %.2f' % (point_metadata['successful_guess_count'],
-                                      point_metadata['total_guess_count'],
-                                      success_rate)
+            print point.question
+            print '%d / %d = %.2f' % (point.successful_guess_count,
+                                      point.total_guess_count,
+                                      point.get_success_rate())
 
 
     def study(self):
@@ -276,7 +274,7 @@ class Point(object):
 
 class PointImage(object):
 
-    '''passed a file path of an image at start up closes and opens said image'''
+    '''passed a file path of an image at start up, opens and closes said image'''
 
     def __init__(self, image_path):
         self.image_path = image_path
