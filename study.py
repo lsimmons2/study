@@ -11,8 +11,8 @@ import signal
 class StudyBuddy(object):
 
 
-    def __init__(self, study_file_path=None, show_all=False, success_rate_threshold=1.00, just_show_statistics=False):
-        self.study_file_path = study_file_path
+    def __init__(self, study_file_paths=None, show_all=False, success_rate_threshold=1.00, just_show_statistics=False):
+        self.study_file_paths = study_file_paths
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
@@ -20,7 +20,7 @@ class StudyBuddy(object):
         self.metadata_file_path = self._get_metadata_file_path()
         self._check_metadata_file()
         self.highest_point_id = self._get_highest_point_id()
-        self._write_file_with_ids()
+        self._format_study_files()
 
         self._set_points()
         self._filter_points_to_study()
@@ -59,35 +59,44 @@ class StudyBuddy(object):
             return None
 
 
-    def _get_file_lines(self):
-        with open(self.study_file_path, 'r') as f:
-            return f.read().splitlines()
+    def _get_files_lines(self, specific_file_path=None):
+        all_files_lines = []
+        if specific_file_path:
+            study_file_paths = [specific_file_path]
+        else:
+            study_file_paths = self.study_file_paths # all of study buddy's files
+        for file_path in study_file_paths:
+            with open(file_path, 'r') as f:
+                all_files_lines = all_files_lines + f.read().splitlines()
+        return all_files_lines
 
 
-    def _write_file_with_ids(self):
-        new_file_str = ''
-        last_id = self.highest_point_id
-        file_lines = self._get_file_lines()
-        comment_lines = []
-        for line in file_lines:
-            if not self._is_comment(line):
-                line_id = self._get_point_id(line)
-                if line_id:
-                    last_id = line_id
-                # if ends with ? then doesn't end with id, and needs to
-                if line.strip().endswith('?'):
-                    new_id = last_id + 1
-                    line = line + ' ' + str(new_id)
-                    last_id = new_id
-                new_file_str += line + '\n'
-            else:
-                comment_lines.append(line)
-        # comment_lines are pushed to bottom of file
-        for comment_line in comment_lines:
-            new_file_str += comment_line + '\n'
-        with open(self.study_file_path, 'w') as f:
-            f.write(new_file_str)
-    
+    def _format_study_files(self):
+        ''' rewrites all study files ensuring in each one that all question lines
+        end with a ? and all comments are pushed to the bottom of the file '''
+        for file_path in self.study_file_paths:
+            new_file_str = ''
+            # last_id = self.highest_point_id
+            comment_lines = []
+            for line in self._get_files_lines(specific_file_path=file_path):
+                if not self._is_comment(line):
+                    line_id = self._get_point_id(line)
+                    if line_id:
+                        self.highest_point_id = line_id
+                    # if ends with ? then doesn't end with id, and needs to
+                    if line.strip().endswith('?'):
+                        new_id = self.highest_point_id + 1
+                        line = line + ' ' + str(new_id)
+                        self.highest_point_id = new_id
+                    new_file_str += line + '\n'
+                else:
+                    comment_lines.append(line)
+            # comment_lines are pushed to bottom of file
+            for comment_line in comment_lines:
+                new_file_str += comment_line + '\n'
+            with open(file_path, 'w') as f:
+                f.write(new_file_str)
+
 
     def _is_comment(self, line):
         if line.startswith('-'):
@@ -101,12 +110,12 @@ class StudyBuddy(object):
         if self._is_comment(line):
             return False
         line_point_id = self._get_point_id(line)
-        # question lines will have a point_id after self._write_file_with_ids()
+        # question lines will have a point_id after self._format_study_files()
         return bool(line_point_id)
 
 
     def _set_points(self):
-        all_lines = self._get_file_lines()
+        all_lines = self._get_files_lines()
         self.points = []
         for index, line in enumerate(all_lines):
             if self._is_question_line(line):
@@ -292,10 +301,14 @@ class PointImage(object):
 
 
 
+def is_study_file_path(string):
+    return string.endswith('.txt')
+
+
 def get_options():
     args = sys.argv[1:]
-    study_file_path = args[-1]
-    options = {'study_file_path': study_file_path}
+    study_file_paths = [ arg for arg in args if is_study_file_path(arg) ]
+    options = {'study_file_paths': study_file_paths}
     if '-a' in args:
         options['show_all'] = True
     if '-t' in args:
