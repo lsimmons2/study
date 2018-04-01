@@ -16,12 +16,10 @@ class StudyBuddy(object):
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
-
         self.metadata_file_path = self._get_metadata_file_path()
         self._check_metadata_file()
         self.highest_point_id = self._get_highest_point_id()
         self._format_study_files()
-
         self._set_points()
         self._filter_points_to_study()
 
@@ -31,7 +29,7 @@ class StudyBuddy(object):
             all_points_metadata = json.load(f)
         point_ids = [ int(point_id) for point_id in all_points_metadata.keys() ]
         try:
-            return sorted([])[-1]
+            return sorted(point_ids)[-1]
         except IndexError:
             return 0
 
@@ -76,13 +74,9 @@ class StudyBuddy(object):
         end with a ? and all comments are pushed to the bottom of the file '''
         for file_path in self.study_file_paths:
             new_file_str = ''
-            # last_id = self.highest_point_id
             comment_lines = []
             for line in self._get_files_lines(specific_file_path=file_path):
                 if not self._is_comment(line):
-                    line_id = self._get_point_id(line)
-                    if line_id:
-                        self.highest_point_id = line_id
                     # if ends with ? then doesn't end with id, and needs to
                     if line.strip().endswith('?'):
                         new_id = self.highest_point_id + 1
@@ -110,7 +104,8 @@ class StudyBuddy(object):
         if self._is_comment(line):
             return False
         line_point_id = self._get_point_id(line)
-        # question lines will have a point_id after self._format_study_files()
+        # question lines will have a point_id after
+        # self._format_study_files()
         return bool(line_point_id)
 
 
@@ -157,8 +152,19 @@ class StudyBuddy(object):
                 point.study()
         except KeyboardInterrupt:
             print '\nExiting early'
+        self._tear_down()
+
+
+    def _tear_down(self):
+        ''' tearing down here and not in Point because saving each point in Point
+        wouldn't work (not all points were saved before program exited), also
+        reading and writing the metadata file in each point is inefficient '''
+        new_metadata = {}
         for point in self.points:
-            point.tear_down()
+            point.close_images()
+            new_metadata[point.id] = point.get_metadata()
+        with open(self.metadata_file_path, 'w') as f:
+            json.dump(new_metadata, f, indent=2)
 
 
 
@@ -193,7 +199,7 @@ class Point(object):
         else:
             print self.answer
         self._handle_response()
-        self._close_images()
+        self.close_images()
 
 
     def _trim_question_line(self):
@@ -206,25 +212,16 @@ class Point(object):
             self.question = self.question_line[:question_end_index]
 
 
-    def tear_down(self):
-        self._save_metadata()
-        self._close_images()
-
-
-    def _close_images(self):
-        for image in self.images:
-            image.close()
-
-
-    def _save_metadata(self):
+    def get_metadata(self):
         updated_metadata = {}
         for attr in self._get_default_metadata().keys():
             updated_metadata[attr] = getattr(self, attr)
-        with open(self.metadata_file_path, 'r') as f:
-            all_points_metadata = json.load(f)
-        all_points_metadata[str(self.id)] = updated_metadata
-        with open(self.metadata_file_path, 'w') as f:
-            json.dump(all_points_metadata, f, indent=2)
+        return updated_metadata
+
+
+    def close_images(self):
+        for image in self.images:
+            image.close()
 
 
     def _handle_response(self):
@@ -283,10 +280,12 @@ class Point(object):
 
 class PointImage(object):
 
-    '''passed a file path of an image at start up, opens and closes said image'''
+    ''' passed a file path of an image at start up, opens and closes said image '''
 
-    def __init__(self, image_path):
-        self.image_path = image_path
+    IMAGES_DIR = '~/.study_images'
+
+    def __init__(self, image_file_name):
+        self.image_path = '%s/%s' % (self.IMAGES_DIR, image_file_name)
 
     def open(self):
         open_image_cmd = 'gnome-open %s' % self.image_path
