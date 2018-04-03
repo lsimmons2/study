@@ -54,11 +54,11 @@ class StudyBuddy(object):
 
 
     def _get_files_lines(self, specific_file_path=None):
-        all_files_lines = []
         if specific_file_path:
             study_file_paths = [specific_file_path]
         else:
             study_file_paths = self.study_file_paths # all of study buddy's files
+        all_files_lines = []
         for file_path in study_file_paths:
             with open(file_path, 'r') as f:
                 all_files_lines = all_files_lines + f.read().splitlines()
@@ -119,7 +119,7 @@ class StudyBuddy(object):
 
     def _filter_and_sort_points_to_study(self):
         self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
-        self.points_to_study.sort(key=lambda x: x.total_guess_count)
+        self.points_to_study.sort(key=lambda x: (x.total_guess_count, x.success_rate))
         
             
     def _should_study_point(self, point):
@@ -127,7 +127,7 @@ class StudyBuddy(object):
             return False
         if point.total_guess_count < 3:
             return True
-        if point.get_success_rate() > self.success_rate_threshold:
+        if point.success_rate > self.success_rate_threshold:
             return False
         return True
 
@@ -138,7 +138,7 @@ class StudyBuddy(object):
             print point.question
             print '%d / %d = %.2f' % (point.successful_guess_count,
                                       point.total_guess_count,
-                                      point.get_success_rate())
+                                      point.success_rate)
 
 
     def study(self):
@@ -178,6 +178,7 @@ class Point(object):
         self._trim_question_line()
         self.metadata_file_path = config.METADATA_FILE_PATH
         self._read_metadata()
+        self.success_rate = self._get_success_rate()
         self.images = []
 
 
@@ -217,7 +218,7 @@ class Point(object):
             self.question = self.question_line[:question_end_index:]
         else:
             # don't want the point id displayed when asking question
-            self.question = self.question_line[:question_end_index]
+            self.question = self.question_line[:question_end_index+1]
 
 
     def get_metadata(self):
@@ -278,7 +279,7 @@ class Point(object):
         return '.png' in string
 
 
-    def get_success_rate(self):
+    def _get_success_rate(self):
         try:
             return float(self.successful_guess_count) / self.total_guess_count
         except ZeroDivisionError:
