@@ -121,8 +121,6 @@ class StudyBuddy(object):
         self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
         self.points_to_study.sort(key=lambda x: x.total_guess_count)
         
-
-
             
     def _should_study_point(self, point):
         if point.is_hidden and not self.show_all:
@@ -158,12 +156,13 @@ class StudyBuddy(object):
         ''' tearing down here and not in Point because saving each point in Point
         wouldn't work (not all points were saved before program exited), also
         reading and writing the metadata file in each point is inefficient '''
-        new_metadata = {}
+        with open(self.metadata_file_path, 'r') as f:
+            metadata = json.load(f)
         for point in self.points:
             point.close_images()
-            new_metadata[point.id] = point.get_metadata()
+            metadata[str(point.id)] = point.get_metadata()
         with open(self.metadata_file_path, 'w') as f:
-            json.dump(new_metadata, f, indent=2)
+            json.dump(metadata, f, indent=2)
 
 
 
@@ -187,7 +186,7 @@ class Point(object):
             question_snippet = self.question
         else:
             question_snippet = '"%s...?"' % self.question[:25]
-        return '<Point %s>' % question_snippet
+        return '<Point %d %s>' % (self.id, question_snippet)
 
 
     def study(self):
