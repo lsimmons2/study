@@ -11,17 +11,17 @@ import signal
 class StudyBuddy(object):
 
 
-    def __init__(self, study_file_paths=None, show_all=False, success_rate_threshold=1.00, just_show_statistics=False):
+    def __init__(self, study_file_paths=None, show_all=False, success_rate_threshold=0.8, just_show_statistics=False):
         self.study_file_paths = study_file_paths
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
-        self.metadata_file_path = self._get_metadata_file_path()
+        self.metadata_file_path = config.METADATA_FILE_PATH
         self._check_metadata_file()
         self.highest_point_id = self._get_highest_point_id()
         self._format_study_files()
         self._set_points()
-        self._filter_points_to_study()
+        self._filter_and_sort_points_to_study()
 
 
     def _get_highest_point_id(self):
@@ -32,10 +32,6 @@ class StudyBuddy(object):
             return sorted(point_ids)[-1]
         except IndexError:
             return 0
-
-
-    def _get_metadata_file_path(self):
-        return os.path.expanduser('~') + '/.study_metadata.json'
 
 
     def _check_metadata_file(self):
@@ -117,20 +113,23 @@ class StudyBuddy(object):
                 question_line = line
                 answer_line = all_lines[index+1] # answer should be line after question line
                 point_id = self._get_point_id(line)
-                new_point = Point(question_line, answer_line, point_id, self.metadata_file_path)
+                new_point = Point(question_line, answer_line, point_id)
                 self.points.append(new_point)
 
 
-    def _filter_points_to_study(self):
+    def _filter_and_sort_points_to_study(self):
         self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
+        self.points_to_study.sort(key=lambda x: x.total_guess_count)
+        
+
 
             
     def _should_study_point(self, point):
+        if point.is_hidden and not self.show_all:
+            return False
         if point.total_guess_count < 3:
             return True
-        if point.get_success_rate() >= self.success_rate_threshold:
-            return False
-        if point.is_hidden and not self.show_all:
+        if point.get_success_rate() > self.success_rate_threshold:
             return False
         return True
 
@@ -171,28 +170,38 @@ class StudyBuddy(object):
 class Point(object):
 
 
-    def __init__(self, question_line, answer_line, point_id, metadata_file_path):
+    def __init__(self, question_line, answer_line, point_id):
         self.question_line = question_line
         self.answer = answer_line
         self.id = point_id
         self.question_is_image = self._is_image_path(question_line)
         self.answer_is_image = self._is_image_path(answer_line)
         self._trim_question_line()
-        self.metadata_file_path = metadata_file_path
+        self.metadata_file_path = config.METADATA_FILE_PATH
         self._read_metadata()
         self.images = []
+
+
+    def __str__(self):
+        if self.question_is_image:
+            question_snippet = self.question
+        else:
+            question_snippet = '"%s...?"' % self.question[:25]
+        return '<Point %s>' % question_snippet
 
 
     def study(self):
         print '\n'
         if self.question_is_image:
+            print 'QUESTION IMAGE %s %d' % (self.question, self.id)
             question_image = PointImage(self.question)
             question_image.open()
             self.images.append(question_image)
         else:
-            print self.question
+            print '%s %d' % (self.question, self.id)
         raw_input()
         if self.answer_is_image:
+            print 'ANSWER IMAGE %s' % self.answer
             answer_image = PointImage(self.answer)
             answer_image.open()
             self.images.append(answer_image)
@@ -282,10 +291,8 @@ class PointImage(object):
 
     ''' passed a file path of an image at start up, opens and closes said image '''
 
-    IMAGES_DIR = '~/.study_images'
-
     def __init__(self, image_file_name):
-        self.image_path = '%s/%s' % (self.IMAGES_DIR, image_file_name)
+        self.image_path = '%s/%s' % (config.IMAGES_DIR, image_file_name)
 
     def open(self):
         open_image_cmd = 'gnome-open %s' % self.image_path
@@ -297,6 +304,16 @@ class PointImage(object):
     def close(self):
         pid = os.getpgid(self.process.pid)
         os.killpg(pid, signal.SIGTERM)
+
+
+
+class Config(object):
+
+    def __init__(self):
+        self.IMAGES_DIR = os.getenv('STUDY_IMAGES_DIR')
+        self.METADATA_FILE_PATH = os.getenv('METADATA_FILE_PATH')
+
+config = Config()
 
 
 
@@ -315,8 +332,6 @@ def get_options():
     if '-s' in args:
         options['just_show_statistics'] = True
     return options
-
-
 
 if __name__ == '__main__':
     options = get_options()
