@@ -67,7 +67,7 @@ class StudyBuddy(object):
 
     def _format_study_files(self):
         ''' rewrites all study files ensuring in each one that all question lines
-        end with a ? and all comments are pushed to the bottom of the file '''
+        end with an id and all comments are pushed to the bottom of the file '''
         for file_path in self.study_file_paths:
             new_file_str = ''
             comment_lines = []
@@ -119,37 +119,56 @@ class StudyBuddy(object):
 
     def _filter_and_sort_points_to_study(self):
         self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
-        self.points_to_study.sort(key=lambda x: (x.total_guess_count, x.success_rate))
-        
+        self.points_to_study.sort(key=lambda x: (x.total_attempt_count, x.success_rate))
+
             
     def _should_study_point(self, point):
         if point.is_hidden and not self.show_all:
             return False
-        if point.total_guess_count < 3:
+        if point.total_attempt_count < 3:
             return True
         if point.success_rate > self.success_rate_threshold:
             return False
         return True
 
 
-    def _show_statistics(self):
+    def _show_all_point_stats(self):
         for point in self.points:
             print
             print point.question
-            print '%d / %d = %.2f' % (point.successful_guess_count,
-                                      point.total_guess_count,
+            print '%d / %d = %.2f' % (point.successful_attempt_count,
+                                      point.total_attempt_count,
                                       point.success_rate)
+
+
+    def _show_study_session_stats(self):
+        points_seen = [ p for p in self.points_to_study if p.was_attempted or p.was_passed ]
+        successful_attempt_count = 0
+        pass_count = 0
+        for point in points_seen:
+            if point.was_attempted_successfully:
+                successful_attempt_count += 1
+            elif point.was_passed:
+                pass_count += 1
+        total_attempt_count = len(points_seen) - pass_count
+        stats_str = '\n%d points attempted, %d answered correctly.' % (total_attempt_count,
+                                                                       successful_attempt_count)
+        if pass_count:
+            stats_str = '%s, %d passed.' % (stats_str[:-1], pass_count)
+        print stats_str
+
 
 
     def study(self):
         if self.just_show_statistics:
-            return self._show_statistics()
+            return self._show_all_point_stats()
         try:
             for point in self.points_to_study:
                 point.study()
         except KeyboardInterrupt:
             print '\nExiting early'
         self._tear_down()
+        self._show_study_session_stats()
 
 
     def _tear_down(self):
@@ -180,6 +199,9 @@ class Point(object):
         self._read_metadata()
         self.success_rate = self._get_success_rate()
         self.images = []
+        self.was_attempted = False
+        self.was_attempted_successfully = False
+        self.was_passed = False
 
 
     def __str__(self):
@@ -217,7 +239,7 @@ class Point(object):
             # can't have point id or ? in an image path
             self.question = self.question_line[:question_end_index:]
         else:
-            # don't want the point id displayed when asking question
+            # don't store the id with the question text
             self.question = self.question_line[:question_end_index+1]
 
 
@@ -238,12 +260,16 @@ class Point(object):
         if response == 'h':
             self.is_hidden = True
         elif response == 'y' or response == 'c':
-            self.successful_guess_count += 1
-            self.total_guess_count += 1
+            self.successful_attempt_count += 1
+            self.total_attempt_count += 1
+            self.was_attempted = True
+            self.was_attempted_successfully = True
         elif response == 'n' or response == 'i':
-            self.total_guess_count += 1
+            self.total_attempt_count += 1
+            self.was_attempted = True
         elif response == 'p':
             print 'Passing...'
+            self.was_passed = True
         else:
             print 'Mark correct or not'
             return self._handle_response()
@@ -269,8 +295,8 @@ class Point(object):
 
     def _get_default_metadata(self):
         return {
-            'total_guess_count': 0,
-            'successful_guess_count': 0,
+            'total_attempt_count': 0,
+            'successful_attempt_count': 0,
             'is_hidden': False
         }
 
@@ -281,7 +307,7 @@ class Point(object):
 
     def _get_success_rate(self):
         try:
-            return float(self.successful_guess_count) / self.total_guess_count
+            return float(self.successful_attempt_count) / self.total_attempt_count
         except ZeroDivisionError:
             return 0.00
 
