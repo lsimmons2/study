@@ -343,13 +343,44 @@ config = Config()
 
 
 
-def is_study_file_path(string):
-    return string.endswith('.txt')
+def is_study_file(file_path):
+    ''' to be a study file, file has to be a .txt file and
+    have a study "shebang" at the top of the file '''
+    if not file_path.endswith('.txt'):
+        return False
+    with open(file_path, 'r') as f:
+        file_text = f.read()
+    file_lines = file_text.splitlines()
+    for line in file_lines:
+        # study shebang has to be before any lines of text
+        if line:
+            if line.strip() == '*study':
+                return True
+            return False
+    return False
+
+
+def get_study_file_paths(args):
+    study_file_paths = []
+    for arg in args:
+        # if you explicitly specify a .txt file, then consider it a study file
+        if arg.endswith('.txt'):
+            file_path = os.path.abspath(arg)
+            study_file_paths.append(file_path)
+        # if you give a directory, recursively search it looking for files that
+        # fit critera set in is_study_file()
+        elif os.path.isdir(arg):
+            for directory, sub_directories, files in os.walk(arg):
+                for file_name in files:
+                    file_path = os.path.abspath(os.path.join(directory, file_name))
+                    if is_study_file(file_path):
+                        study_file_paths.append(file_path)
+    return study_file_paths
 
 
 def get_options():
     args = sys.argv[1:]
-    study_file_paths = [ arg for arg in args if is_study_file_path(arg) ]
+    study_file_paths = get_study_file_paths(args)
     options = {'study_file_paths': study_file_paths}
     if '-a' in args:
         options['show_all'] = True
