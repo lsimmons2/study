@@ -11,11 +11,12 @@ import signal
 class StudyBuddy(object):
 
 
-    def __init__(self, study_file_paths=None, show_all=False, success_rate_threshold=0.8, just_show_statistics=False):
+    def __init__(self, study_file_paths=None, show_all=False, success_rate_threshold=0.8, just_show_statistics=False, just_show_uncertainties=False):
         self.study_file_paths = study_file_paths
         self.show_all = show_all
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
+        self.just_show_uncertainties = just_show_uncertainties
         self.metadata_file_path = config.METADATA_FILE_PATH
         self._check_metadata_file()
         self.highest_point_id = self._get_highest_point_id()
@@ -53,7 +54,7 @@ class StudyBuddy(object):
             return None
 
 
-    def _get_files_lines(self, specific_file_path=None):
+    def _get_point_lines(self, specific_file_path=None):
         if specific_file_path:
             study_file_paths = [specific_file_path]
         else:
@@ -66,47 +67,61 @@ class StudyBuddy(object):
 
 
     def _format_study_files(self):
-        ''' rewrites all study files ensuring in each one that all question lines
-        end with an id and all comments are pushed to the bottom of the file '''
+        ''' rewrites all study files ensuring in each one that all question
+        lines end with an id '''
         for file_path in self.study_file_paths:
             new_file_str = ''
-            comment_lines = []
-            for line in self._get_files_lines(specific_file_path=file_path):
-                if not self._is_comment(line):
+            for line in self._get_point_lines(specific_file_path=file_path):
+                if self._is_point_line(line):
                     # if ends with ? then doesn't end with id, and needs to
                     if line.strip().endswith('?'):
                         new_id = self.highest_point_id + 1
                         line = line + ' ' + str(new_id)
                         self.highest_point_id = new_id
-                    new_file_str += line + '\n'
-                else:
-                    comment_lines.append(line)
-            # comment_lines are pushed to bottom of file
-            for comment_line in comment_lines:
-                new_file_str += comment_line + '\n'
+                new_file_str += line + '\n'
             with open(file_path, 'w') as f:
                 f.write(new_file_str)
 
 
-    def _is_comment(self, line):
-        if line.startswith('-'):
-            return True
-        if line.startswith('*'):
+    def _is_point_line(self, line):
+        if self._is_study_shebang(line):
+            return False
+        if self._is_note(line):
+            return False
+        if self._is_uncertainty(line):
+            return False
+        return True
+
+
+    def _is_note(self, line):
+        return line.strip().startswith('-')
+
+
+    def _is_uncertainty(self, line):
+        if line.strip().startswith('*') and not self._is_study_shebang(line):
             return True
         return False
 
 
+    def _is_study_shebang(self, line):
+        return line.strip() == '*study'
+
+
     def _is_question_line(self, line):
-        if self._is_comment(line):
+        if self._is_study_shebang(line):
+            return False
+        if self._is_uncertainty(line):
+            return False
+        if self._is_note(line):
             return False
         line_point_id = self._get_point_id(line)
-        # question lines will have a point_id after
-        # self._format_study_files()
+        # question lines will have a point_id
+        # after self._format_study_files()
         return bool(line_point_id)
 
 
     def _set_points(self):
-        all_lines = self._get_files_lines()
+        all_lines = self._get_point_lines()
         self.points = []
         for index, line in enumerate(all_lines):
             if self._is_question_line(line):
@@ -158,10 +173,30 @@ class StudyBuddy(object):
         print stats_str
 
 
+    def _show_uncertainties(self):
+        for file_path in self.study_file_paths:
+            file_uncertainties = self._get_study_file_uncertainties(file_path)
+            if file_uncertainties:
+                print '\n%s' % file_path
+                for q in file_uncertainties:
+                    print q
+
+
+    def _get_study_file_uncertainties(self, file_path):
+        uncertainties = []
+        with open(file_path, 'r') as f:
+            lines = f.read().splitlines()
+        for line in lines:
+            if self._is_uncertainty(line):
+                uncertainties.append(line)
+        return uncertainties
+
 
     def study(self):
         if self.just_show_statistics:
             return self._show_all_point_stats()
+        if self.just_show_uncertainties:
+            return self._show_uncertainties()
         try:
             for point in self.points_to_study:
                 point.study()
@@ -375,7 +410,7 @@ def get_study_file_paths(args):
                     file_path = os.path.abspath(os.path.join(directory, file_name))
                     if is_study_file(file_path):
                         study_file_paths.append(file_path)
-    return study_file_paths
+    return list(set(study_file_paths))
 
 
 def get_options():
@@ -388,6 +423,8 @@ def get_options():
         options['success_rate_threshold'] = float(args[args.index('-t') + 1])
     if '-s' in args:
         options['just_show_statistics'] = True
+    if '-u' in args:
+        options['just_show_uncertainties'] = True
     return options
 
 if __name__ == '__main__':
