@@ -5,6 +5,7 @@ import json
 import subprocess
 import os
 import signal
+import collections
 
 
 
@@ -17,7 +18,7 @@ class StudyBuddy(object):
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
         self.just_show_uncertainties = just_show_uncertainties
-        self.metadata_file_path = config.METADATA_FILE_PATH
+        self.metadata_file_path = Config.METADATA_FILE_PATH
         self._check_metadata_file()
         self.highest_point_id = self._get_highest_point_id()
         self._format_study_files()
@@ -156,8 +157,12 @@ class StudyBuddy(object):
                                       point.success_rate)
 
 
+    def _get_seen_points(self):
+        return [ p for p in self.points_to_study if p.was_attempted or p.was_passed ]
+
+
     def _show_study_session_stats(self):
-        points_seen = [ p for p in self.points_to_study if p.was_attempted or p.was_passed ]
+        points_seen = self._get_seen_points()
         successful_attempt_count = 0
         pass_count = 0
         for point in points_seen:
@@ -211,8 +216,10 @@ class StudyBuddy(object):
         wouldn't work (not all points were saved before program exited), also
         reading and writing the metadata file in each point is inefficient '''
         with open(self.metadata_file_path, 'r') as f:
-            metadata = json.load(f)
-        for point in self.points:
+            metadata = json.load(f, object_pairs_hook=collections.OrderedDict)
+        seen_points = self._get_seen_points()
+        seen_points.sort(key=lambda x: x.id)
+        for point in seen_points:
             point.close_images()
             metadata[str(point.id)] = point.get_metadata()
         with open(self.metadata_file_path, 'w') as f:
@@ -230,7 +237,7 @@ class Point(object):
         self.question_is_image = self._is_image_path(question_line)
         self.answer_is_image = self._is_image_path(answer_line)
         self._trim_question_line()
-        self.metadata_file_path = config.METADATA_FILE_PATH
+        self.metadata_file_path = Config.METADATA_FILE_PATH
         self._read_metadata()
         self.success_rate = self._get_success_rate()
         self.images = []
@@ -353,7 +360,7 @@ class PointImage(object):
     ''' passed a file path of an image at start up, opens and closes said image '''
 
     def __init__(self, image_file_name):
-        self.image_path = '%s/%s' % (config.IMAGES_DIR, image_file_name)
+        self.image_path = '%s/%s' % (Config.IMAGES_DIR, image_file_name)
 
     def open(self):
         open_image_cmd = 'gnome-open %s' % self.image_path
@@ -370,11 +377,9 @@ class PointImage(object):
 
 class Config(object):
 
-    def __init__(self):
-        self.IMAGES_DIR = os.getenv('STUDY_IMAGES_DIR')
-        self.METADATA_FILE_PATH = os.getenv('METADATA_FILE_PATH')
-
-config = Config()
+    IMAGES_DIR = os.getenv('STUDY_IMAGES_DIR')
+    METADATA_FILE_PATH = os.getenv('METADATA_FILE_PATH')
+    STUDY_BASE_DIR = os.getenv('STUDY_BASE_DIR')
 
 
 
@@ -410,6 +415,12 @@ def get_study_file_paths(args):
                     file_path = os.path.abspath(os.path.join(directory, file_name))
                     if is_study_file(file_path):
                         study_file_paths.append(file_path)
+    if not study_file_paths:
+        if Config.STUDY_BASE_DIR:
+            print 'Searching for study files...'
+            return get_study_file_paths([Config.STUDY_BASE_DIR])
+        else:
+            print 'Need to specify file or dir to study or set STUDY_BASE_DIR environmental variable.'
     return list(set(study_file_paths))
 
 
