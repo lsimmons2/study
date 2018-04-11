@@ -122,20 +122,24 @@ class StudyBuddy(object):
 
 
     def _set_points(self):
-        all_lines = self._get_point_lines()
-        self.points = []
-        for index, line in enumerate(all_lines):
-            if self._is_question_line(line):
-                question_line = line
-                answer_line = all_lines[index+1] # answer should be line after question line
-                point_id = self._get_point_id(line)
-                new_point = Point(question_line, answer_line, point_id)
-                self.points.append(new_point)
+        self.points_by_file = {}
+        for file_path in self.study_file_paths:
+            self.points_by_file[file_path] = []
+            file_lines = self._get_point_lines(specific_file_path=file_path)
+            for index, line in enumerate(file_lines):
+                if self._is_question_line(line):
+                    question_line = line
+                    answer_line = file_lines[index+1] # answer should be line after question line
+                    point_id = self._get_point_id(line)
+                    new_point = Point(question_line, answer_line, point_id)
+                    self.points_by_file[file_path].append(new_point)
 
 
     def _filter_and_sort_points_to_study(self):
-        self.points_to_study = [ point for point in self.points if self._should_study_point(point) ]
-        self.points_to_study.sort(key=lambda x: (x.total_attempt_count, x.success_rate))
+        for file_path in self.points_by_file:
+            self.points_by_file[file_path] = [ p for p in self.points_by_file[file_path] if self._should_study_point(p) ]
+            self.points_by_file[file_path].sort(key=lambda x: (x.total_attempt_count, x.success_rate))
+        return
 
             
     def _should_study_point(self, point):
@@ -203,8 +207,10 @@ class StudyBuddy(object):
         if self.just_show_uncertainties:
             return self._show_uncertainties()
         try:
-            for point in self.points_to_study:
-                point.study()
+            for file_path in self.points_by_file:
+                print '\n%s' % file_path
+                for point in self.points_by_file[file_path]:
+                    point.study()
         except KeyboardInterrupt:
             print '\nExiting early'
         self._tear_down()
