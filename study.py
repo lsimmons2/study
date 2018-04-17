@@ -139,7 +139,6 @@ class StudyBuddy(object):
         for file_path in self.points_by_file:
             self.points_by_file[file_path] = [ p for p in self.points_by_file[file_path] if self._should_study_point(p) ]
             self.points_by_file[file_path].sort(key=lambda x: (x.total_attempt_count, x.success_rate))
-        return
 
             
     def _should_study_point(self, point):
@@ -162,7 +161,12 @@ class StudyBuddy(object):
 
 
     def _get_seen_points(self):
-        return [ p for p in self.points_to_study if p.was_attempted or p.was_passed ]
+        seen_points = []
+        for file_path in self.points_by_file:
+            for point in self.points_by_file[file_path]:
+                if point.was_attempted or point.was_passed:
+                    seen_points.append(point)
+        return seen_points
 
 
     def _show_study_session_stats(self):
