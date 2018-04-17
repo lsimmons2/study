@@ -20,10 +20,35 @@ class StudyBuddy(object):
         self.just_show_uncertainties = just_show_uncertainties
         self.metadata_file_path = Config.METADATA_FILE_PATH
         self._check_metadata_file()
-        self.highest_point_id = self._get_highest_point_id()
+        self._sync_points_to_metadata_file()
         self._format_study_files()
-        self._set_points()
+        self._collect_all_points()
         self._filter_and_sort_points_to_study()
+
+
+    def _sync_points_to_metadata_file(self):
+        all_point_ids = []
+        for line in self._get_file_lines():
+            point_id = self._get_point_id(line)
+            if point_id:
+                all_point_ids.append(point_id)
+        if len(all_point_ids) != len(set(all_point_ids)):
+            raise Exception('There are duplicate point ids in study files.')
+        metadata = self._get_current_metadata()
+        for point_id in all_point_ids:
+            if str(point_id) not in metadata:
+                metadata[str(point_id)] = Point.default_metadata
+        self._overwrite_metadata_file(metadata)
+
+
+    def _get_current_metadata(self):
+        with open(self.metadata_file_path, 'r') as f:
+            return json.load(f, object_pairs_hook=collections.OrderedDict)
+
+
+    def _overwrite_metadata_file(self, new_metadata):
+        with open(self.metadata_file_path, 'w') as f:
+            json.dump(new_metadata, f, indent=2)
 
 
     def _get_highest_point_id(self):
@@ -55,7 +80,7 @@ class StudyBuddy(object):
             return None
 
 
-    def _get_point_lines(self, specific_file_path=None):
+    def _get_file_lines(self, specific_file_path=None):
         if specific_file_path:
             study_file_paths = [specific_file_path]
         else:
@@ -70,13 +95,16 @@ class StudyBuddy(object):
     def _format_study_files(self):
         ''' rewrites all study files ensuring in each one that all question
         lines end with an id '''
+        self.highest_point_id = self._get_highest_point_id()
         for file_path in self.study_file_paths:
             new_file_str = ''
-            for line in self._get_point_lines(specific_file_path=file_path):
+            for line in self._get_file_lines(specific_file_path=file_path):
                 if self._is_point_line(line):
                     # if ends with ? then doesn't end with id, and needs to
                     if line.strip().endswith('?'):
+                        print 'yaaaaaaaa'
                         new_id = self.highest_point_id + 1
+                        print new_id
                         line = line + ' ' + str(new_id)
                         self.highest_point_id = new_id
                 new_file_str += line + '\n'
@@ -121,11 +149,11 @@ class StudyBuddy(object):
         return bool(line_point_id)
 
 
-    def _set_points(self):
+    def _collect_all_points(self):
         self.points_by_file = {}
         for file_path in self.study_file_paths:
             self.points_by_file[file_path] = []
-            file_lines = self._get_point_lines(specific_file_path=file_path)
+            file_lines = self._get_file_lines(specific_file_path=file_path)
             for index, line in enumerate(file_lines):
                 if self._is_question_line(line):
                     question_line = line
@@ -225,19 +253,24 @@ class StudyBuddy(object):
         ''' tearing down here and not in Point because saving each point in Point
         wouldn't work (not all points were saved before program exited), also
         reading and writing the metadata file in each point is inefficient '''
-        with open(self.metadata_file_path, 'r') as f:
-            metadata = json.load(f, object_pairs_hook=collections.OrderedDict)
+        metadata = self._get_current_metadata()
         seen_points = self._get_seen_points()
-        seen_points.sort(key=lambda x: x.id)
         for point in seen_points:
             point.close_images()
             metadata[str(point.id)] = point.get_metadata()
-        with open(self.metadata_file_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        self._overwrite_metadata_file(metadata)
+
 
 
 
 class Point(object):
+
+
+    default_metadata = {
+        'total_attempt_count': 0,
+        'successful_attempt_count': 0,
+        'is_hidden': False
+    }
 
 
     def __init__(self, question_line, answer_line, point_id):
@@ -297,7 +330,7 @@ class Point(object):
 
     def get_metadata(self):
         updated_metadata = {}
-        for attr in self._get_default_metadata().keys():
+        for attr in self.default_metadata.keys():
             updated_metadata[attr] = getattr(self, attr)
         if self.was_attempted:
             updated_metadata['total_attempt_count'] += 1
@@ -331,27 +364,15 @@ class Point(object):
     def _read_metadata(self):
         with open(self.metadata_file_path, 'r') as f:
             all_points_metadata = json.load(f)
-        try:
-            point_metadata = all_points_metadata[str(self.id)]
-        except KeyError:
-            point_metadata = self._get_default_metadata()
+        point_metadata = all_points_metadata[str(self.id)]
         # get attrs from default dict in case more fields are added
-        default_metadata = self._get_default_metadata()
-        for attr in default_metadata.keys():
+        for attr in self.default_metadata.keys():
             try:
                 setattr(self, attr, point_metadata[attr])
             except KeyError:
                 # if field has been added to default metadata since point has
                 # been saved - give point default value of new field
-                setattr(self, attr, default_metadata[attr])
-
-
-    def _get_default_metadata(self):
-        return {
-            'total_attempt_count': 0,
-            'successful_attempt_count': 0,
-            'is_hidden': False
-        }
+                setattr(self, attr, self.default_metadata[attr])
 
 
     def _is_image_path(self, string):
