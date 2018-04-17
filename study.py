@@ -299,6 +299,10 @@ class Point(object):
         updated_metadata = {}
         for attr in self._get_default_metadata().keys():
             updated_metadata[attr] = getattr(self, attr)
+        if self.was_attempted:
+            updated_metadata['total_attempt_count'] += 1
+        if self.was_attempted_successfully:
+            updated_metadata['successful_attempt_count'] += 1
         return updated_metadata
 
 
@@ -312,12 +316,9 @@ class Point(object):
         if response == 'h':
             self.is_hidden = True
         elif response == 'y' or response == 'c':
-            self.successful_attempt_count += 1
-            self.total_attempt_count += 1
             self.was_attempted = True
             self.was_attempted_successfully = True
         elif response == 'n' or response == 'i':
-            self.total_attempt_count += 1
             self.was_attempted = True
         elif response == 'p':
             print 'Passing...'
