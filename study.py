@@ -22,6 +22,7 @@ class StudyBuddy(object):
         self._check_metadata_file()
         self._sync_points_to_metadata_file()
         self._format_study_files()
+        self._sync_points_to_metadata_file()
         self._collect_all_points()
         self._filter_and_sort_points_to_study()
 
@@ -102,9 +103,7 @@ class StudyBuddy(object):
                 if self._is_point_line(line):
                     # if ends with ? then doesn't end with id, and needs to
                     if line.strip().endswith('?'):
-                        print 'yaaaaaaaa'
                         new_id = self.highest_point_id + 1
-                        print new_id
                         line = line + ' ' + str(new_id)
                         self.highest_point_id = new_id
                 new_file_str += line + '\n'
@@ -180,12 +179,13 @@ class StudyBuddy(object):
 
 
     def _show_all_point_stats(self):
-        for point in self.points:
-            print
-            print point.question
-            print '%d / %d = %.2f' % (point.successful_attempt_count,
-                                      point.total_attempt_count,
-                                      point.success_rate)
+        for file_path, file_points in self.points_by_file.iteritems():
+            for point in file_points:
+                print
+                print '%s %s' % (point.question, point.id)
+                print '%d / %d = %.2f' % (point.successful_attempt_count,
+                                          point.total_attempt_count,
+                                          point.success_rate)
 
 
     def _get_seen_points(self):
@@ -417,7 +417,7 @@ class Config(object):
 
 def is_study_file(file_path):
     ''' to be a study file, file has to be a .txt file and
-    have a study "shebang" at the top of the file '''
+    have a study "shebang" (*study) at the top of the file '''
     if not file_path.endswith('.txt'):
         return False
     with open(file_path, 'r') as f:
@@ -432,28 +432,46 @@ def is_study_file(file_path):
     return False
 
 
+def get_study_file_paths_in_dir(directory, to_exclude_file_paths):
+    study_file_paths = []
+    for directory, sub_directories, files in os.walk(directory):
+        for file_name in files:
+            file_path = os.path.abspath(os.path.join(directory, file_name))
+            if is_study_file(file_path):
+                study_file_paths.append(file_path)
+    return [ fp for fp in study_file_paths if fp not in to_exclude_file_paths ]
+
+
 def get_study_file_paths(args):
+    to_exclude_arg_indeces = []
+    to_exclude_file_paths = []
+    for arg_index, arg in enumerate(args):
+        if arg == '-x':
+            to_exclude_arg_indeces.append(arg_index)
+            file_path = os.path.abspath(args[arg_index+1])
+            to_exclude_file_paths.append(file_path)
+    for index in reversed(to_exclude_arg_indeces):
+        del args[index+1]
+        del args[index]
     study_file_paths = []
     for arg in args:
         # if you explicitly specify a .txt file, then consider it a study file
         if arg.endswith('.txt'):
             file_path = os.path.abspath(arg)
-            study_file_paths.append(file_path)
+            if file_path not in to_exclude_file_paths:
+                study_file_paths.append(file_path)
         # if you give a directory, recursively search it looking for files that
         # fit critera set in is_study_file()
         elif os.path.isdir(arg):
-            for directory, sub_directories, files in os.walk(arg):
-                for file_name in files:
-                    file_path = os.path.abspath(os.path.join(directory, file_name))
-                    if is_study_file(file_path):
-                        study_file_paths.append(file_path)
+            study_file_paths = study_file_paths + get_study_file_paths_in_dir(arg, to_exclude_file_paths)
     if not study_file_paths:
         if Config.STUDY_BASE_DIR:
             print 'Searching for study files...'
-            return get_study_file_paths([Config.STUDY_BASE_DIR])
+            study_file_paths = get_study_file_paths_in_dir(Config.STUDY_BASE_DIR, to_exclude_file_paths)
         else:
             print 'Need to specify file or dir to study or set STUDY_BASE_DIR environmental variable.'
     return list(set(study_file_paths))
+            
 
 
 def get_options():
