@@ -6,6 +6,7 @@ import subprocess
 import os
 import signal
 import collections
+import fileinput
 
 
 
@@ -20,26 +21,47 @@ class StudyBuddy(object):
         self.just_show_uncertainties = just_show_uncertainties
         self.metadata_file_path = Config.METADATA_FILE_PATH
         self._check_metadata_file()
-        self._sync_points_to_metadata_file()
-        self._format_study_files()
-        self._sync_points_to_metadata_file()
-        self._collect_all_points()
+        self.files = self._parse_files()
+        self._update_metadata_file_and_study_files_with_new_point_ids()
         self._filter_and_sort_points_to_study()
 
 
-    def _sync_points_to_metadata_file(self):
-        all_point_ids = []
-        for line in self._get_file_lines():
-            point_id = self._get_point_id(line)
-            if point_id:
-                all_point_ids.append(point_id)
-        if len(all_point_ids) != len(set(all_point_ids)):
-            raise Exception('There are duplicate point ids in study files.')
+    def _parse_files(self):
+        files = []
+        for file_path in self.study_file_paths:
+            files.append(File(file_path))
+        return files
+
+
+    def _update_metadata_file_and_study_files_with_new_point_ids(self):
+        new_points = []
+        for file in self.files:
+            new_points_in_file = []
+            for point in file.points:
+                if point.is_new:
+                    point.id = self._get_new_point_id()
+                    new_points_in_file.append(point)
+            for new_point in new_points_in_file:
+                for line in fileinput.input(file.path, inplace=True):
+                    if fileinput.filelineno() == new_point.line_no_in_file:
+                        line_text = '%s %d\n' % (new_point.question, new_point.id)
+                    else:
+                        line_text = line
+                    sys.stdout.write(line_text) # stdout written to file
+            new_points = new_points + new_points_in_file
         metadata = self._get_current_metadata()
-        for point_id in all_point_ids:
-            if str(point_id) not in metadata:
-                metadata[str(point_id)] = Point.default_metadata
+        for point in new_points:
+            metadata[str(point.id)] = point.get_metadata()
         self._overwrite_metadata_file(metadata)
+
+
+    def _get_new_point_id(self):
+        point_ids = [ int(id) for id in self._get_current_metadata().keys() ]
+        try:
+            highest_current_point_id = sorted(point_ids)[-1]
+            return highest_current_point_id + 1
+        except IndexError:
+            return 0
 
 
     def _get_current_metadata(self):
@@ -50,16 +72,6 @@ class StudyBuddy(object):
     def _overwrite_metadata_file(self, new_metadata):
         with open(self.metadata_file_path, 'w') as f:
             json.dump(new_metadata, f, indent=2)
-
-
-    def _get_highest_point_id(self):
-        with open(self.metadata_file_path, 'r') as f:
-            all_points_metadata = json.load(f)
-        point_ids = [ int(point_id) for point_id in all_points_metadata.keys() ]
-        try:
-            return sorted(point_ids)[-1]
-        except IndexError:
-            return 0
 
 
     def _check_metadata_file(self):
@@ -74,98 +86,10 @@ class StudyBuddy(object):
             raise Exception('Metadata file %s is messed up and isn\'t proper JSON.' % self.metadata_file_path)
 
 
-    def _get_point_id(self, line):
-        try:
-            return int(re.search(r'\? (\d+)$', line).group(1))
-        except AttributeError:
-            return None
-
-
-    def _get_file_lines(self, specific_file_path=None):
-        if specific_file_path:
-            study_file_paths = [specific_file_path]
-        else:
-            study_file_paths = self.study_file_paths # all of study buddy's files
-        all_files_lines = []
-        for file_path in study_file_paths:
-            with open(file_path, 'r') as f:
-                all_files_lines = all_files_lines + f.read().splitlines()
-        return all_files_lines
-
-
-    def _format_study_files(self):
-        ''' rewrites all study files ensuring in each one that all question
-        lines end with an id '''
-        self.highest_point_id = self._get_highest_point_id()
-        for file_path in self.study_file_paths:
-            new_file_str = ''
-            for line in self._get_file_lines(specific_file_path=file_path):
-                if self._is_point_line(line):
-                    # if ends with ? then doesn't end with id, and needs to
-                    if line.strip().endswith('?'):
-                        new_id = self.highest_point_id + 1
-                        line = line + ' ' + str(new_id)
-                        self.highest_point_id = new_id
-                new_file_str += line + '\n'
-            with open(file_path, 'w') as f:
-                f.write(new_file_str)
-
-
-    def _is_point_line(self, line):
-        if self._is_study_shebang(line):
-            return False
-        if self._is_note(line):
-            return False
-        if self._is_uncertainty(line):
-            return False
-        return True
-
-
-    def _is_note(self, line):
-        return line.strip().startswith('-')
-
-
-    def _is_uncertainty(self, line):
-        if line.strip().startswith('*') and not self._is_study_shebang(line):
-            return True
-        return False
-
-
-    def _is_study_shebang(self, line):
-        return line.strip() == '*study'
-
-
-    def _is_question_line(self, line):
-        if self._is_study_shebang(line):
-            return False
-        if self._is_uncertainty(line):
-            return False
-        if self._is_note(line):
-            return False
-        line_point_id = self._get_point_id(line)
-        # question lines will have a point_id
-        # after self._format_study_files()
-        return bool(line_point_id)
-
-
-    def _collect_all_points(self):
-        self.points_by_file = {}
-        for file_path in self.study_file_paths:
-            self.points_by_file[file_path] = []
-            file_lines = self._get_file_lines(specific_file_path=file_path)
-            for index, line in enumerate(file_lines):
-                if self._is_question_line(line):
-                    question_line = line
-                    answer_line = file_lines[index+1] # answer should be line after question line
-                    point_id = self._get_point_id(line)
-                    new_point = Point(question_line, answer_line, point_id)
-                    self.points_by_file[file_path].append(new_point)
-
-
     def _filter_and_sort_points_to_study(self):
-        for file_path in self.points_by_file:
-            self.points_by_file[file_path] = [ p for p in self.points_by_file[file_path] if self._should_study_point(p) ]
-            self.points_by_file[file_path].sort(key=lambda x: (x.total_attempt_count, x.success_rate))
+        for file in self.files:
+            file.points = [ p for p in file.points if self._should_study_point(p) ]
+            file.points.sort(key=lambda x: (x.total_attempt_count, x.success_rate))
 
             
     def _should_study_point(self, point):
@@ -179,10 +103,10 @@ class StudyBuddy(object):
 
 
     def _show_all_point_stats(self):
-        for file_path, file_points in self.points_by_file.iteritems():
-            for point in file_points:
-                print
-                print '%s %s' % (point.question, point.id)
+        for file in self.files:
+            file.print_path_header()
+            for point in file.points:
+                print '\n%s %s' % (point.question, point.id)
                 print '%d / %d = %.2f' % (point.successful_attempt_count,
                                           point.total_attempt_count,
                                           point.success_rate)
@@ -190,8 +114,8 @@ class StudyBuddy(object):
 
     def _get_seen_points(self):
         seen_points = []
-        for file_path in self.points_by_file:
-            for point in self.points_by_file[file_path]:
+        for file in self.files:
+            for point in file.points:
                 if point.was_attempted or point.was_passed:
                     seen_points.append(point)
         return seen_points
@@ -215,22 +139,11 @@ class StudyBuddy(object):
 
 
     def _show_uncertainties(self):
-        for file_path in self.study_file_paths:
-            file_uncertainties = self._get_study_file_uncertainties(file_path)
-            if file_uncertainties:
-                print '\n%s' % file_path
-                for q in file_uncertainties:
-                    print q
-
-
-    def _get_study_file_uncertainties(self, file_path):
-        uncertainties = []
-        with open(file_path, 'r') as f:
-            lines = f.read().splitlines()
-        for line in lines:
-            if self._is_uncertainty(line):
-                uncertainties.append(line)
-        return uncertainties
+        for file in self.files:
+            if file.uncertainties:
+                file.print_path_header()
+            for uncertainty in file.uncertainties:
+                print uncertainty.text
 
 
     def study(self):
@@ -239,9 +152,9 @@ class StudyBuddy(object):
         if self.just_show_uncertainties:
             return self._show_uncertainties()
         try:
-            for file_path in self.points_by_file:
-                print '\n%s' % file_path
-                for point in self.points_by_file[file_path]:
+            for file in self.files:
+                print '\n%s' % file.path
+                for point in file.points:
                     point.study()
         except KeyboardInterrupt:
             print '\nExiting early'
@@ -250,9 +163,9 @@ class StudyBuddy(object):
 
 
     def _tear_down(self):
-        ''' tearing down here and not in Point because saving each point in Point
-        wouldn't work (not all points were saved before program exited), also
-        reading and writing the metadata file in each point is inefficient '''
+        # tearing down here and not in Point because saving each point in Point
+        # wouldn't work (not all points were saved before program exited), also
+        # reading and writing the metadata file in each point is inefficient
         metadata = self._get_current_metadata()
         seen_points = self._get_seen_points()
         for point in seen_points:
@@ -273,15 +186,17 @@ class Point(object):
     }
 
 
-    def __init__(self, question_line, answer_line, point_id):
-        self.question_line = question_line
+    def __init__(self, question, answer_line, point_id, line_no_in_file):
+        self.question = question
         self.answer = answer_line
         self.id = point_id
-        self.question_is_image = self._is_image_path(question_line)
+        self.line_no_in_file = line_no_in_file
+        self.question_is_image = self._is_image_path(question)
         self.answer_is_image = self._is_image_path(answer_line)
         self._trim_question_line()
         self.metadata_file_path = Config.METADATA_FILE_PATH
-        self._read_metadata()
+        self.is_new = self._determine_if_new()
+        self._read_or_create_metadata_and_sync_to_metadata_file()
         self.success_rate = self._get_success_rate()
         self.images = []
         self.was_attempted = False
@@ -295,6 +210,10 @@ class Point(object):
         else:
             question_snippet = '"%s...?"' % self.question[:25]
         return '<Point %d %s>' % (self.id, question_snippet)
+
+
+    def _determine_if_new(self):
+        return not bool(self.id)
 
 
     def study(self):
@@ -319,13 +238,13 @@ class Point(object):
 
 
     def _trim_question_line(self):
-        question_end_index = self.question_line.rfind('?')
+        question_end_index = self.question.rfind('?')
         if self.question_is_image:
             # can't have point id or ? in an image path
-            self.question = self.question_line[:question_end_index:]
+            self.question = self.question[:question_end_index:]
         else:
             # don't store the id with the question text
-            self.question = self.question_line[:question_end_index+1]
+            self.question = self.question[:question_end_index+1]
 
 
     def get_metadata(self):
@@ -361,10 +280,13 @@ class Point(object):
             return self._handle_response()
 
 
-    def _read_metadata(self):
-        with open(self.metadata_file_path, 'r') as f:
-            all_points_metadata = json.load(f)
-        point_metadata = all_points_metadata[str(self.id)]
+    def _read_or_create_metadata_and_sync_to_metadata_file(self):
+        if not self.is_new:
+            with open(self.metadata_file_path, 'r') as f:
+                all_points_metadata = json.load(f)
+            point_metadata = all_points_metadata[str(self.id)]
+        else:
+            point_metadata = self.default_metadata
         # get attrs from default dict in case more fields are added
         for attr in self.default_metadata.keys():
             try:
@@ -404,6 +326,73 @@ class PointImage(object):
     def close(self):
         pid = os.getpgid(self.process.pid)
         os.killpg(pid, signal.SIGTERM)
+
+
+
+class Line(object):
+
+
+    def __init__(self, text):
+        self.text = text
+        self.is_uncertainty = self._determine_if_uncertainty()
+        self.is_question, self.point_id = self._determine_if_question_and_get_point_id()
+
+
+    def _determine_if_uncertainty(self):
+        return self.text.strip().startswith('*') and not self._is_study_shebang()
+
+
+    def _is_study_shebang(self):
+        return self.text.strip() == '*study'
+
+
+    def _determine_if_question_and_get_point_id(self):
+        if self.is_uncertainty:
+            return False, None
+        # TODO: combine this into one regex
+        if self.text.strip().endswith('?'):
+            return True, None
+        try:
+            point_id = int(re.search(r'\? (\d+)?$', self.text.strip()).groups(1)[0])
+            return True, point_id
+        except AttributeError:
+            return False, None
+
+
+
+class File(object):
+
+    def __init__(self, path):
+        self.path = path
+        self.lines = self._create_line_objects()
+        self.points = self._create_points()
+        self.uncertainties = self._get_uncertainties()
+
+
+    def print_path_header(self):
+        print '\n\n*** %s ***' % self.path
+
+
+    def _create_points(self):
+        points = []
+        for i, line in enumerate(self.lines):
+            if line.is_question:
+                question_line = line
+                # answer line should be one after question line
+                answer_line = self.lines[i+1]
+                line_no = i + 1 # 0-indexed
+                new_point = Point(question_line.text, answer_line.text, line.point_id, line_no)
+                points.append(new_point)
+        return points
+
+
+    def _create_line_objects(self):
+        with open(self.path, 'r') as f:
+            return [ Line(line_text) for line_text in f.read().splitlines() ]
+
+
+    def _get_uncertainties(self):
+        return [ line for line in self.lines if line.is_uncertainty ]
 
 
 
