@@ -38,6 +38,7 @@ class StudyBuddy(object):
                 if point.is_new:
                     point.id = self._get_new_point_id()
                     new_points_in_file.append(point)
+            # add ids to end of question lines in study files
             for new_point in new_points_in_file:
                 for line in fileinput.input(file.path, inplace=True):
                     if fileinput.filelineno() == new_point.line_no_in_file:
@@ -46,14 +47,11 @@ class StudyBuddy(object):
                         line_text = line
                     sys.stdout.write(line_text) # stdout written to file
             new_points = new_points + new_points_in_file
-        metadata = self._get_current_metadata()
-        for point in new_points:
-            metadata[str(point.id)] = point.get_metadata()
-        self._overwrite_metadata_file(metadata)
+        self._update_points_in_metadata_file(new_points)
 
 
     def _get_new_point_id(self):
-        point_ids = [ int(id) for id in self._get_current_metadata().keys() ]
+        point_ids = [ int(id) for id in self._get_current_metadata() ]
         try:
             highest_current_point_id = sorted(point_ids)[-1]
             return highest_current_point_id + 1
@@ -66,9 +64,12 @@ class StudyBuddy(object):
             return json.load(f, object_pairs_hook=collections.OrderedDict)
 
 
-    def _overwrite_metadata_file(self, new_metadata):
+    def _update_points_in_metadata_file(self, points_to_update):
+        metadata = self._get_current_metadata()
+        for point in points_to_update:
+            metadata[str(point.id)] = point.get_metadata()
         with open(self.metadata_file_path, 'w') as f:
-            json.dump(new_metadata, f, indent=2)
+            json.dump(metadata, f, indent=2)
 
 
     def _check_metadata_file(self):
@@ -164,12 +165,8 @@ class StudyBuddy(object):
         # tearing down here and not in Point because saving each point in Point
         # wouldn't work (not all points were saved before program exited), also
         # reading and writing the metadata file in each point is inefficient
-        metadata = self._get_current_metadata()
         seen_points = self._get_seen_points()
-        for point in seen_points:
-            point.close_images()
-            metadata[str(point.id)] = point.get_metadata()
-        self._overwrite_metadata_file(metadata)
+        self._update_points_in_metadata_file(seen_points)
 
 
 
