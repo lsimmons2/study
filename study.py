@@ -21,16 +21,13 @@ class StudyBuddy(object):
         self.just_show_uncertainties = just_show_uncertainties
         self.metadata_file_path = Config.METADATA_FILE_PATH
         self._check_metadata_file()
-        self.files = self._parse_files()
+        self.files = self._create_files()
         self._update_metadata_file_and_study_files_with_new_point_ids()
         self._filter_and_sort_points_to_study()
 
 
-    def _parse_files(self):
-        files = []
-        for file_path in self.study_file_paths:
-            files.append(File(file_path))
-        return files
+    def _create_files(self):
+        return [ File(file_path) for file_path in self.study_file_paths ]
 
 
     def _update_metadata_file_and_study_files_with_new_point_ids(self):
@@ -88,8 +85,8 @@ class StudyBuddy(object):
 
     def _filter_and_sort_points_to_study(self):
         for file in self.files:
-            file.points = [ p for p in file.points if self._should_study_point(p) ]
-            file.points.sort(key=lambda x: (x.total_attempt_count, x.success_rate))
+            file.points_to_study = [ p for p in file.points if self._should_study_point(p) ]
+            file.points_to_study.sort(key=lambda x: (x.total_attempt_count, x.success_rate))
 
             
     def _should_study_point(self, point):
@@ -153,9 +150,10 @@ class StudyBuddy(object):
             return self._show_uncertainties()
         try:
             for file in self.files:
-                print '\n%s' % file.path
-                for point in file.points:
-                    point.study()
+                if file.points_to_study:
+                    file.print_path_header()
+                    for point in file.points_to_study:
+                        point.study()
         except KeyboardInterrupt:
             print '\nExiting early'
         self._tear_down()
@@ -404,69 +402,77 @@ class Config(object):
 
 
 
-def is_study_file(file_path):
-    ''' to be a study file, file has to be a .txt file and
-    have a study "shebang" (*study) at the top of the file '''
-    if not file_path.endswith('.txt'):
-        return False
-    with open(file_path, 'r') as f:
-        file_text = f.read()
-    file_lines = file_text.splitlines()
-    for line in file_lines:
-        # study shebang has to be before any lines of text
-        if line:
-            if line.strip() == '*study':
-                return True
+class StudyFileSearcher(object):
+
+    ''' searches through CLI args passed to program for paths of files to study '''
+
+    def __init__(self, cli_args):
+        self.cli_args = cli_args
+
+
+    def is_study_file(self, file_path):
+        ''' to be a study file, file has to be a .txt file and
+        have a study "shebang" (*study) at the top of the file '''
+        if not file_path.endswith('.txt'):
             return False
-    return False
+        with open(file_path, 'r') as f:
+            file_text = f.read()
+        file_lines = file_text.splitlines()
+        for line in file_lines:
+            # study shebang has to be before any lines of text
+            if line:
+                if line.strip() == '*study':
+                    return True
+                return False
+        return False
 
 
-def get_study_file_paths_in_dir(directory, to_exclude_file_paths):
-    study_file_paths = []
-    for directory, sub_directories, files in os.walk(directory):
-        for file_name in files:
-            file_path = os.path.abspath(os.path.join(directory, file_name))
-            if is_study_file(file_path):
-                study_file_paths.append(file_path)
-    return [ fp for fp in study_file_paths if fp not in to_exclude_file_paths ]
+    def get_study_file_paths_in_dir(self, directory, to_exclude_file_paths):
+        study_file_paths = []
+        for directory, sub_directories, files in os.walk(directory):
+            for file_name in files:
+                file_path = os.path.abspath(os.path.join(directory, file_name))
+                if self.is_study_file(file_path):
+                    study_file_paths.append(file_path)
+        return [ fp for fp in study_file_paths if fp not in to_exclude_file_paths ]
 
 
-def get_study_file_paths(args):
-    to_exclude_arg_indeces = []
-    to_exclude_file_paths = []
-    for arg_index, arg in enumerate(args):
-        if arg == '-x':
-            to_exclude_arg_indeces.append(arg_index)
-            file_path = os.path.abspath(args[arg_index+1])
-            to_exclude_file_paths.append(file_path)
-    for index in reversed(to_exclude_arg_indeces):
-        del args[index+1]
-        del args[index]
-    study_file_paths = []
-    for arg in args:
-        # if you explicitly specify a .txt file, then consider it a study file
-        if arg.endswith('.txt'):
-            file_path = os.path.abspath(arg)
-            if file_path not in to_exclude_file_paths:
-                study_file_paths.append(file_path)
-        # if you give a directory, recursively search it looking for files that
-        # fit critera set in is_study_file()
-        elif os.path.isdir(arg):
-            study_file_paths = study_file_paths + get_study_file_paths_in_dir(arg, to_exclude_file_paths)
-    if not study_file_paths:
-        if Config.STUDY_BASE_DIR:
-            print 'Searching for study files...'
-            study_file_paths = get_study_file_paths_in_dir(Config.STUDY_BASE_DIR, to_exclude_file_paths)
-        else:
-            print 'Need to specify file or dir to study or set STUDY_BASE_DIR environmental variable.'
-    return list(set(study_file_paths))
+    def search(self):
+        to_exclude_arg_indeces = []
+        to_exclude_file_paths = []
+        for arg_index, arg in enumerate(self.cli_args):
+            if arg == '-x':
+                to_exclude_arg_indeces.append(arg_index)
+                file_path = os.path.abspath(self.cli_args[arg_index+1])
+                to_exclude_file_paths.append(file_path)
+        for index in reversed(to_exclude_arg_indeces):
+            del self.cli_args[index+1]
+            del self.cli_args[index]
+        study_file_paths = []
+        for arg in self.cli_args:
+            # if you explicitly specify a .txt file, then consider it a study file
+            if arg.endswith('.txt'):
+                file_path = os.path.abspath(arg)
+                if file_path not in to_exclude_file_paths:
+                    study_file_paths.append(file_path)
+            # if you give a directory, recursively search it looking for files that
+            # fit critera set in is_study_file()
+            elif os.path.isdir(arg):
+                study_file_paths = study_file_paths + get_study_file_paths_in_dir(arg, to_exclude_file_paths)
+        if not study_file_paths:
+            if Config.STUDY_BASE_DIR:
+                print 'Searching for study files...'
+                study_file_paths = self.get_study_file_paths_in_dir(Config.STUDY_BASE_DIR, to_exclude_file_paths)
+            else:
+                print 'Need to specify file or dir to study or set STUDY_BASE_DIR environmental variable.'
+        return list(set(study_file_paths))
             
 
 
 def get_options():
     args = sys.argv[1:]
-    study_file_paths = get_study_file_paths(args)
-    options = {'study_file_paths': study_file_paths}
+    study_file_searcher = StudyFileSearcher(args)
+    options = {'study_file_paths': study_file_searcher.search()}
     if '-a' in args:
         options['show_all'] = True
     if '-t' in args:
