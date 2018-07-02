@@ -26,17 +26,28 @@ class StudyBuddy(object):
         self._filter_and_sort_points_to_study()
 
 
+    def _get_highest_point_id_in_metadata_file(self):
+        point_ids = [ int(id) for id in self._get_current_metadata() ]
+        try:
+            highest_current_point_id = sorted(point_ids)[-1]
+            return highest_current_point_id
+        except IndexError:
+            return 0
+
+
     def _create_files(self):
         return [ File(file_path) for file_path in self.study_file_paths ]
 
 
     def _update_metadata_file_and_study_files_with_new_point_ids(self):
         new_points = []
+        highest_point_id = self._get_highest_point_id_in_metadata_file()
         for file in self.files:
             new_points_in_file = []
             for point in file.points:
                 if point.is_new:
-                    point.id = self._get_new_point_id()
+                    point.id = highest_point_id + 1
+                    highest_point_id = point.id
                     new_points_in_file.append(point)
             # add ids to end of question lines in study files
             for new_point in new_points_in_file:
@@ -48,15 +59,6 @@ class StudyBuddy(object):
                     sys.stdout.write(line_text) # stdout written to file
             new_points = new_points + new_points_in_file
         self._update_points_in_metadata_file(new_points)
-
-
-    def _get_new_point_id(self):
-        point_ids = [ int(id) for id in self._get_current_metadata() ]
-        try:
-            highest_current_point_id = sorted(point_ids)[-1]
-            return highest_current_point_id + 1
-        except IndexError:
-            return 0
 
 
     def _get_current_metadata(self):
