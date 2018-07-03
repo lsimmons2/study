@@ -89,7 +89,7 @@ class StudyBuddy(object):
         seen_points = []
         for file in self.files:
             for point in file.points:
-                if point.was_attempted or point.was_passed:
+                if point.was_attempted or point.was_passed or point.was_marked_to_be_hidden:
                     seen_points.append(point)
         return seen_points
 
@@ -98,16 +98,21 @@ class StudyBuddy(object):
         points_seen = self._get_seen_points()
         successful_attempt_count = 0
         pass_count = 0
+        hidden_count = 0
         for point in points_seen:
             if point.was_attempted_successfully:
                 successful_attempt_count += 1
             elif point.was_passed:
                 pass_count += 1
+            elif point.was_marked_to_be_hidden:
+                hidden_count += 1
         total_attempt_count = len(points_seen) - pass_count
         stats_str = '\n%d points attempted, %d answered correctly.' % (total_attempt_count,
                                                                        successful_attempt_count)
         if pass_count:
             stats_str = '%s, %d passed.' % (stats_str[:-1], pass_count)
+        if hidden_count:
+            stats_str = '%s, %d hidden.' % (stats_str[:-1], hidden_count)
         print stats_str
 
 
@@ -171,6 +176,7 @@ class Point(object):
         self.was_attempted = False
         self.was_attempted_successfully = False
         self.was_passed = False
+        self.was_marked_to_be_hidden = False
 
 
     def __str__(self):
@@ -224,6 +230,8 @@ class Point(object):
             updated_metadata['total_attempt_count'] += 1
         if self.was_attempted_successfully:
             updated_metadata['successful_attempt_count'] += 1
+        if self.was_marked_to_be_hidden:
+            updated_metadata['is_hidden'] = True
         return updated_metadata
 
 
@@ -235,7 +243,7 @@ class Point(object):
     def _handle_response(self):
         response = raw_input()
         if response == 'h':
-            self.is_hidden = True
+            self.was_marked_to_be_hidden = True
         elif response == 'y' or response == 'c':
             self.was_attempted = True
             self.was_attempted_successfully = True
