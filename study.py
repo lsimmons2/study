@@ -19,15 +19,13 @@ class StudyBuddy(object):
         self.success_rate_threshold = success_rate_threshold
         self.just_show_statistics = just_show_statistics
         self.just_show_uncertainties = just_show_uncertainties
-        self.metadata_file_path = Config.METADATA_FILE_PATH
-        self._check_metadata_file()
         self.files = self._create_files()
         self._update_metadata_file_and_study_files_with_new_point_ids()
         self._filter_and_sort_points_to_study()
 
 
     def _get_highest_point_id_in_metadata_file(self):
-        point_ids = [ int(id) for id in self._get_current_metadata() ]
+        point_ids = [ int(id) for id in metadata_client.get_all_points_metadata() ]
         try:
             highest_current_point_id = sorted(point_ids)[-1]
             return highest_current_point_id
@@ -58,32 +56,7 @@ class StudyBuddy(object):
                         line_text = line
                     sys.stdout.write(line_text) # stdout written to file
             new_points = new_points + new_points_in_file
-        self._update_points_in_metadata_file(new_points)
-
-
-    def _get_current_metadata(self):
-        with open(self.metadata_file_path, 'r') as f:
-            return json.load(f, object_pairs_hook=collections.OrderedDict)
-
-
-    def _update_points_in_metadata_file(self, points_to_update):
-        metadata = self._get_current_metadata()
-        for point in points_to_update:
-            metadata[str(point.id)] = point.get_metadata()
-        with open(self.metadata_file_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-
-
-    def _check_metadata_file(self):
-        try:
-            with open(self.metadata_file_path, 'r') as f:
-                json.load(f)
-        except IOError:
-            with open(self.metadata_file_path, 'w') as f:
-                print 'Creating empty metadata file %s.' % self.metadata_file_path
-                json.dump({}, f)
-        except ValueError:
-            raise Exception('Metadata file %s is messed up and isn\'t proper JSON.' % self.metadata_file_path)
+        metadata_client.update_points_metadata(new_points)
 
 
     def _filter_and_sort_points_to_study(self):
@@ -168,7 +141,7 @@ class StudyBuddy(object):
         # wouldn't work (not all points were saved before program exited), also
         # reading and writing the metadata file in each point is inefficient
         seen_points = self._get_seen_points()
-        self._update_points_in_metadata_file(seen_points)
+        metadata_client.update_points_metadata(seen_points)
 
 
 
@@ -191,7 +164,6 @@ class Point(object):
         self.question_is_image = self._is_image_path(question)
         self.answer_is_image = self._is_image_path(answer_line)
         self._trim_question_line()
-        self.metadata_file_path = Config.METADATA_FILE_PATH
         self.is_new = self._determine_if_new()
         self._read_or_create_metadata_and_sync_to_metadata_file()
         self.success_rate = self._get_success_rate()
@@ -279,9 +251,7 @@ class Point(object):
 
     def _read_or_create_metadata_and_sync_to_metadata_file(self):
         if not self.is_new:
-            with open(self.metadata_file_path, 'r') as f:
-                all_points_metadata = json.load(f)
-            point_metadata = all_points_metadata[str(self.id)]
+            point_metadata = metadata_client.get_point_metadata(self.id)
         else:
             point_metadata = self.default_metadata
         # get attrs from default dict in case more fields are added
@@ -466,6 +436,49 @@ class StudyFileSearcher(object):
                 print 'Need to specify file or dir to study or set STUDY_BASE_DIR environmental variable.'
         return list(set(study_file_paths))
             
+
+
+class MetadataClient(object):
+
+
+    metadata_file_path = Config.METADATA_FILE_PATH
+
+
+    def __init__(self):
+        self._check_metadata_file()
+
+
+    def get_point_metadata(self, point_id):
+        all_points_metadata = self.get_all_points_metadata()
+        return all_points_metadata[str(point_id)]
+
+
+    def get_all_points_metadata(self):
+        with open(self.metadata_file_path, 'r') as f:
+            return json.load(f, object_pairs_hook=collections.OrderedDict)
+
+
+    def update_points_metadata(self, points_to_update):
+        metadata = self.get_all_points_metadata()
+        for point in points_to_update:
+            metadata[str(point.id)] = point.get_metadata()
+        with open(self.metadata_file_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+
+    def _check_metadata_file(self):
+        try:
+            with open(self.metadata_file_path, 'r') as f:
+                json.load(f)
+        except IOError:
+            with open(self.metadata_file_path, 'w') as f:
+                print 'Creating empty metadata file %s.' % self.metadata_file_path
+                json.dump({}, f)
+        except ValueError:
+            raise Exception('Metadata file %s is messed up and isn\'t proper JSON.' % self.metadata_file_path)
+
+metadata_client = MetadataClient()
+
 
 
 def get_options():
