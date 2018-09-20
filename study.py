@@ -41,13 +41,14 @@ class StudyBuddy(object):
         new_points = []
         highest_point_id = self._get_highest_point_id_in_metadata_file()
         for file in self.files:
+            # give ids to all new points in files
             new_points_in_file = []
             for point in file.points:
                 if point.is_new:
                     point.id = highest_point_id + 1
                     highest_point_id = point.id
                     new_points_in_file.append(point)
-            # add ids to end of question lines in study files
+            # add the new ids to end of question lines in study files
             for new_point in new_points_in_file:
                 for line in fileinput.input(file.path, inplace=True):
                     if fileinput.filelineno() == new_point.line_no_in_file:
@@ -476,6 +477,9 @@ class MetadataClient(object):
 
     def _check_metadata_file(self):
         try:
+            if not self.metadata_file_path:
+                home_dir = os.path.expanduser("~")
+                self.metadata_file_path = "%s/.study_metadata.json" % home_dir
             with open(self.metadata_file_path, 'r') as f:
                 json.load(f)
         except IOError:
