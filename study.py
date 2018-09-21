@@ -443,7 +443,10 @@ class StudyFileSearcher(object):
                 study_file_paths = self.get_study_file_paths_in_dir(Config.STUDY_BASE_DIR, to_exclude_file_paths)
             else:
                 print 'Need to specify file or dir to study or set STUDY_BASE_DIR environmental variable.'
-        return list(set(study_file_paths))
+        all_file_paths = list(set(study_file_paths))
+        file_log_str = 'file' if len(all_file_paths) == 1 else 'files'
+        print '%d %s collected to study' % (len(all_file_paths), file_log_str)
+        return all_file_paths
             
 
 
@@ -459,7 +462,12 @@ class MetadataClient(object):
 
     def get_point_metadata(self, point_id):
         all_points_metadata = self.get_all_points_metadata()
-        return all_points_metadata[str(point_id)]
+        try:
+            return all_points_metadata[str(point_id)]
+        except KeyError:
+            # var for message so traceback isn't as crowded
+            exception_message = 'Point with id %d not in study metadata file, make sure you\'re specifying the same METADATA_FILE_PATH as you did when you first studied that file that point %d is in.' % (point_id, point_id)
+            raise Exception(exception_message)
 
 
     def get_all_points_metadata(self):
