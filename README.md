@@ -1,4 +1,3 @@
-TODO: remove ticks from keyboard glyphs
 <h1>My Study Program</h1>
 
 This is a program I wrote to help me study notes I take in a flash-card manner.
